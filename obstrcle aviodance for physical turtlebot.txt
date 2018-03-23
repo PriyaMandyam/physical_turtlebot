@@ -1,0 +1,67 @@
+rosinit('192.168.11.123');
+handles.colorImgSub = exampleHelperTurtleBotEnableColorCamera;
+handles.cliffSub = rossubscriber('/mobile_base/events/cliff', 'BufferSize', 5);
+handles.bumpSub = rossubscriber('/mobile_base/sensors/bumper_pointcloud', 'BufferSize', 5);
+handles.soundPub = rospublisher('/mobile_base/commands/sound', 'kobuki_msgs/Sound');
+handles.velPub = rospublisher('/mobile_base/commands/velocity');
+blueBallParams.blueMax = 30; % Maximum permissible deviation from pure blue
+blueBallParams.darkMin = 120; % Minimum acceptable darkness value
+latestImg = readImage(handles.colorImgSub.LatestMessage);
+[c,~,ball] = exampleHelperTurtleBotFindBlueBall(latestImg,blueBallParams);
+exampleHelperTurtleBotPlotObject(latestImg,ball,c);
+pause(3);
+
+
+% blueBallParams.blueMax = 30; % Maximum permissible deviation from pure blue
+% blueBallParams.darkMin = 90; % Minimum acceptable darkness value
+%
+% latestImg = readImage(handles.colorImgSub.LatestMessage);
+% [c,~,ball] = exampleHelperTurtleBotFindBlueBall(latestImg,blueBallParams);
+% exampleHelperTurtleBotPlotObject(latestImg,ball,c);
+handles.params = blueBallParams;
+gains.lin.pgain = 1/100;
+if exampleHelperTurtleBotIsPhysicalRobot
+gains.lin = struct('pgain',1/100,'dgain',1/1000,'igain',0,'maxwindup',0','setpoint',0.75);
+gains.ang = struct('pgain',1/100,'dgain',1/3000,'igain',0,'maxwindup',0','setpoint',0.5);
+end
+
+% THESE SHOULD BE USED ON HARDWARE
+handles.gains = gains;
+timer2 =
+timer('TimerFcn',{@exampleHelperTurtleBotTrackingTimer,handles},'Period',0.1,'ExecutionMo
+de','fixedSpacing');
+timer2.StopFcn = {@exampleHelperTurtleBotStopCallback};
+start(timer2);
+pause(1);
+stop(timer2);
+delete(timerfindall)
+displayEndOfDemoMessage(mfilename)
+return
+
+switch state
+case ExampleHelperTurtleBotStates.Seek
+% Object-finding state
+[center, scale] = findObject(handles.Tbot.ImColor,handles.params);
+% Wander if no circle is found, target the circle if it exists
+if isempty(center)
+[linearV, angularV] = exampleHelperTurtleBotWanderController();
+else
+[linearV, angularV] = imageControl(center, scale, size(handles.Tbot.ImColor),handles.gains);
+setSound(handles.Tbot,2);
+end
+state = ExampleHelperTurtleBotStates.Seek;
+case ExampleHelperTurtleBotStates.Bumper
+% Bumper contact state
+case ExampleHelperTurtleBotStates.Spin
+% Spin state
+case ExampleHelperTurtleBotStates.Cliff
+% Cliff avoidance
+end
+blueImg = img(:,:,1)/2 + img(:,:,2)/2 - img(:,:,3)/2;
+blueThresh = blueImg < params.blueMax;
+darkIso = -img(:,:,1)/2 - img(:,:,2)/2 + 3*img(:,:,3) - 2*rgb2gray(img);
+darkThresh = darkIso > params.darkMin;
+
+
+ball1 = blueThresh & darkThresh;
+s = regionprops(ball1, {'Centroid','Area','EquivDiameter'});
